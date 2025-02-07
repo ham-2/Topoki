@@ -8,17 +8,18 @@
 #include <sstream>
 
 #include "board.h"
-#include "constants.h"
 #include "eval.h"
 #include "search.h"
 #include "table.h"
 #include "threads.h"
 
-using namespace std;
+constexpr int PRINT_MIN_MS = 500;
+constexpr int PRINT_ATM_MS = 100;
 
-bool compare(pair<Move, int> a, pair<Move, int> b);
+bool compare(std::pair<Move, int> a, std::pair<Move, int> b);
 
-void printer(float time, atomic<bool>* stop, condition_variable* cv, float max_time, bool force_time);
+void printer(float time, std::atomic<bool>* stop,
+	std::condition_variable* cv, float max_time, bool force_time);
 
 
 #endif

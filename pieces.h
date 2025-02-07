@@ -2,8 +2,6 @@
 #define PIECES_INCLUDED
 
 #include <string>
-
-using namespace std;
 	
 enum Color : bool { WHITE = false, BLACK = true };
 
@@ -23,7 +21,7 @@ inline Color to_color(Piece p) {
 	return Color(p > 8);
 }
 
-const string FEN_Pieces = " PNBRQK  pnbrqk";
+const std::string FEN_Pieces = " PNBRQK  pnbrqk";
 
 bool parse_piece(char c, Piece& p);
 

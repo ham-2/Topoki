@@ -79,7 +79,7 @@ void printer(float time, atomic<bool>* stop, condition_variable* cv, float max_t
 				Move m = pvmoves[i].first;
 				Threads.board->do_move(m, &u);
 				TTEntry probe = {};
-				if (Main_TT.probe(Threads.board->get_key(), &probe) != EVAL_FAIL) {
+				if (Main_TT.probe(Threads.board->get_key(), &probe) != -1) {
 					pvmoves[i].second = -probe.eval;
 				}
 				Threads.board->undo_move(m);

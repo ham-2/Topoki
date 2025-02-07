@@ -4,22 +4,45 @@ using namespace std;
 
 Threadmgr Threads;
 const char* startpos_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const char* default_weight = "weights.bin";
+
+int SEARCH_THREADS_MAX = 32;
 	
 void lazy_smp(Thread* t) {
 	int currdepth;
 	TTEntry probe = {};
 
+	SearchParams sp = {
+		t->board, &Threads.stop, &Main_TT, t->step
+	};
+
 	while (!(t->kill)) {
 		unique_lock<mutex> m(t->m);
 		Threads.t_wait.wait(m);
 
+		Main_TT.probe(t->board->get_key(), &probe);
+		int window_a = 2 << (EVAL_BITS - 6);
+		int window_b = 2 << (EVAL_BITS - 6);
+		int window_c = probe.eval;
+
 		while (!Threads.stop) {
 			currdepth = Threads.depth + 1;
 
-			Main_TT.probe(t->board->get_key(), &probe);
-			alpha_beta(*(t->board), &Threads.stop,
-				currdepth, &probe,
-				t->board->get_side(), t->step);
+			alpha_beta(&sp, &probe,
+				currdepth, t->board->get_side(), 0,
+				window_c - window_a,
+				window_c + window_b);
+
+			if (probe.type == 1) {
+				window_a *= 4;
+			}
+			if (probe.type == -1) {
+				window_b *= 4;
+			}
+			if (probe.type == 0) {
+				window_a = 2 << (EVAL_BITS - 6);
+				window_b = 2 << (EVAL_BITS - 6);
+			}
 		}
 	}
 
@@ -27,8 +50,8 @@ void lazy_smp(Thread* t) {
 	return;
 }
 
-Thread::Thread(int id) {
-	board = new Position;
+Thread::Thread(int id, Net* n) {
+	board = new Position(n);
 	this->id = id;
 	step = Primes[id];
 }
@@ -40,13 +63,15 @@ Thread::~Thread() {
 
 void Threadmgr::init() {
 	stop = new atomic<bool>;
-	board = new Position;
-	Threads.threads.push_back(new Thread(0));
+	n = new Net;
+	load_weights<Net>(n, default_weight);
+	board = new Position(n);
+	Threads.threads.push_back(new Thread(0, n));
 	set_all(startpos_fen);
 }
 
 void Threadmgr::add_thread() {
-	Thread* new_thread = new Thread(num_threads);
+	Thread* new_thread = new Thread(num_threads, n);
 	*(new_thread->board) = *board;
 	threads.push_back(new_thread);
 	new_thread->t = new thread(lazy_smp, new_thread);
@@ -110,6 +135,15 @@ void Threadmgr::set_all(string fen) {
 	}
 }
 
+void Threadmgr::setr(int pieces, uint64_t seed)
+{
+	PRNG p(seed);
+	board->set_random(pieces, &p);
+	for (int i = 0; i < threads.size(); i++) {
+		*threads[i]->board = *board;
+	}
+}
+
 void Threadmgr::show(int i) {
 	if (i < 0) { board->show(); }
 	if (i < threads.size()) {
@@ -120,11 +154,9 @@ void Threadmgr::show(int i) {
 void Threadmgr::do_move(Move m) {
 	Undo* u = new Undo;
 	board->do_move(m, u);
-	u->del = true;
 	for (int i = 0; i < threads.size(); i++) {
 		Undo* u = new Undo;
 		threads[i]->board->do_move(m, u);
-		u->del = true;
 	}
 }
 
@@ -141,8 +173,9 @@ void Threadmgr::undo_move(Move m) {
 }
 
 void Threadmgr::test_eval() {
-	int endeval = end_eval(*board);
+	int endeval = end_eval(board);
 	cout << endeval << " " << eval_print(endeval) << "\n";
+	cout << board->get_material() << ' ' << board->get_material() * 4 << '\n';
 }
 
 void Threadmgr::gen()
@@ -157,4 +190,12 @@ void Threadmgr::test_see(string ms) {
 	Move m = board->parse_move(ms);
 	cout << board->see(m) << endl;
 	//cout << board->is_check(m) << endl;
+}
+
+void Threadmgr::set_weights() {
+	board->set_accumulator();
+	for (int i = 0; i < threads.size(); i++) {
+		memcpy(threads[i]->board->get_net(), n, sizeof(Net));
+		threads[i]->board->set_accumulator();
+	}
 }

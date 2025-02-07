@@ -5,7 +5,6 @@
 #include <thread>
 #include <mutex>
 
-#include "constants.h"
 #include "position.h"
 
 #ifdef _WIN64
@@ -15,9 +14,10 @@
 #include <stdlib.h>
 #endif
 
-using namespace std;
-
 extern int num_threads;
+
+constexpr int TABLE_MB_DEFAULT = 32;
+constexpr int TABLE_MB_MAX = 4096;
 
 class spinlock {
 	std::atomic_flag locked = ATOMIC_FLAG_INIT;

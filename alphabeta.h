@@ -1,22 +1,26 @@
 #ifndef ALPHABETA_INCLUDED
 #define ALPHABETA_INCLUDED
 
-#include <mutex>
 #include <atomic>
 #include <iostream>
+#include <mutex>
 
 #include "eval.h"
 #include "position.h"
 #include "movegen.h"
-#include "constants.h"
 #include "table.h"
 
-using namespace std;
+constexpr int NULLMOVE_MAX_PLY = 8;
 
-int alpha_beta(Position& board, atomic<bool>* stop,
-	int ply, TTEntry* probe,
-	Color root_c, int step,
-	int alpha = EVAL_LOSS, int beta = EVAL_WIN,
-	int root_dist = 0);
+struct SearchParams {
+	Position* board;
+	std::atomic<bool>* stop;
+	TT* table;
+	int step;
+};
+
+int alpha_beta(SearchParams* sp, TTEntry* probe,
+	int ply, Color root_color, int root_dist,
+	int alpha, int beta);
 
 #endif

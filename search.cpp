@@ -4,7 +4,7 @@ using namespace std;
 
 bool ATM = false;
 bool lichess_timing = false;
-bool stop_if_mate = true;
+bool stop_if_mate = false;
 
 bool ponder = false;
 atomic<bool> ponder_continue(false);
@@ -122,14 +122,17 @@ void search_start(Thread* t, float time, float max_time, bool force_time, int ma
 		}
 	}
 
-	int window_a = 120;
-	int window_b = 120;
+	int window_a = 2 << (EVAL_BITS - 6);
+	int window_b = 2 << (EVAL_BITS - 6);
 	int window_c = probe.eval;
 
+	SearchParams sp = {
+		board, &(Threads.stop), &Main_TT, t->step
+	};
+
 	while (Threads.depth <= max_ply) {
-		window_c = alpha_beta(*board, &(Threads.stop),
-			Threads.depth, &probe,
-			board->get_side(), t->step,
+		window_c = alpha_beta(&sp, &probe,
+			Threads.depth, t->board->get_side(), 0,
 			window_c - window_a,
 			window_c + window_b);
 
@@ -140,7 +143,7 @@ void search_start(Thread* t, float time, float max_time, bool force_time, int ma
 				Undo u;
 				board->do_move(pvmoves[i].first, &u);
 				TTEntry probe = {};
-				if (Main_TT.probe(board->get_key(), &probe) != EVAL_FAIL) {
+				if (Main_TT.probe(board->get_key(), &probe) != -1) {
 					pvmoves[i].second = -probe.eval;
 				}
 				board->undo_move(pvmoves[i].first);
@@ -156,9 +159,10 @@ void search_start(Thread* t, float time, float max_time, bool force_time, int ma
 
 				Main_TT.probe(board->get_key(), &probe);
 
-				alpha_beta(*board, &(Threads.stop),
-					Threads.depth - i, &probe,
-					~(board->get_side()), t->step);
+				alpha_beta(&sp, &probe,
+					Threads.depth - i, ~(t->board->get_side()), 0,
+					window_c - window_a,
+					window_c + window_b);
 
 				board->undo_move(pvmoves[i].first);
 			}
@@ -183,8 +187,8 @@ void search_start(Thread* t, float time, float max_time, bool force_time, int ma
 			Threads.depth++;
 			print_cond->notify_all();
 
-			window_a = 120;
-			window_b = 120;
+			window_a = 2 << (EVAL_BITS - 6);
+			window_b = 2 << (EVAL_BITS - 6);
 		}
 	}
 
@@ -204,7 +208,7 @@ void search_start(Thread* t, float time, float max_time, bool force_time, int ma
 	Threads.release_cout();
 
 	// Ponder
-	if (ponder_continue && !(probe.eval > 29000 || probe.eval < -29000)) {
+	if (ponder_continue && !is_mate(probe.eval)) {
 		Threads.do_move(bmove);
 		Threads.depth.exchange(DEFAULT_PLY);
 		Threads.stop = false;
@@ -218,12 +222,31 @@ void search_start(Thread* t, float time, float max_time, bool force_time, int ma
 		TTEntry probe_ponder = {};
 		Main_TT.probe(board->get_key(), &probe_ponder);
 		while (Threads.depth <= max_ply && !Threads.stop) {
-			alpha_beta(*board, &(Threads.stop),
-				Threads.depth, &probe_ponder,
-				~(board->get_side()), t->step);
+			window_c = alpha_beta(&sp, &probe,
+				Threads.depth, t->board->get_side(), 0,
+				window_c - window_a,
+				window_c + window_b);
 
-			Main_TT.probe(board->get_key(), &probe_ponder);
-			++Threads.depth;
+			// Forced Stop
+			if (Threads.stop) { break; }
+
+			if (probe.type == 1) {
+				window_a *= 4;
+			}
+			if (probe.type == -1) {
+				window_b *= 4;
+			}
+			if (probe.type == 0) {
+				// Stop if mate
+				if (stop_if_mate && is_mate(window_c)) {
+					break;
+				}
+
+				Threads.depth++;
+
+				window_a = 2 << (EVAL_BITS - 6);;
+				window_b = 2 << (EVAL_BITS - 6);;
+			}
 		}
 
 		Threads.stop = true;

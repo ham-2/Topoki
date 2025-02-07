@@ -1,5 +1,7 @@
 #include "movegen.h"
 
+using namespace std;
+
 void MoveList::generate(Position& board) {
 	Move* list_ptr = list;
 	Color c = board.get_side();
@@ -98,9 +100,9 @@ void MoveList::generate(Position& board) {
 
 void MoveList::show() {
 	for (Move* m = list; m < end; m++) {
-		std::cout << *m << " ";
+		cout << *m << " ";
 	}
-	std::cout << endl;
+	cout << endl;
 }
 
 template<UPiece u>

@@ -46,7 +46,7 @@ int TT::probe(Key key, TTEntry* probe) {
 	}
 	else { // False hit or New node
 		entry_ptr->m.unlock();
-		return EVAL_FAIL;
+		return -1;
 	}
 }
 

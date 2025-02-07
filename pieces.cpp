@@ -1,5 +1,7 @@
 #include "pieces.h"
 
+using namespace std;
+
 bool parse_piece(char c, Piece& p) { 
 	size_t idx = FEN_Pieces.find(c);
 	if (idx == string::npos) { return false; }

@@ -38,7 +38,7 @@ inline int get_file(Square s) { return s & 7; }
 inline int get_rank(Square s) { return s >> 3; }
 inline Square mirror(Square s) { return Square(s ^ 56); }
 
-ostream& operator<<(ostream& os, Square s);
+std::ostream& operator<<(std::ostream& os, Square s);
 
 // Use 16bit integer for moves - 0bXXAABBBBBBCCCCCC
 // C: 6 bits indicating from square
@@ -49,7 +49,7 @@ enum Move : uint16_t {
 	NULL_MOVE = 0
 };
 
-ostream& operator<<(ostream& os, Move m);
+std::ostream& operator<<(std::ostream& os, Move m);
 
 inline Move make_move(Square from, Square to, int type = 0, int promotion = 0) {
 	return Move(from | (to << 6) | (promotion << 12) | (type << 14));
@@ -100,7 +100,7 @@ inline Bitboard get_forward(Color c, Square s) {
 				~RankBoard[0] << (8 * get_rank(s));
 }
 
-void print(ostream& os, Bitboard b);
+void print(std::ostream& os, Bitboard b);
 
 inline int popcount(Bitboard b) {
 	return (int)_mm_popcnt_u64(b);

@@ -1,5 +1,7 @@
 #include "position.h"
 
+using namespace std;
+
 // For Zobrist Hashing
 Key piece_keys[15][64];
 Key castle_keys[16];
@@ -9,9 +11,8 @@ Key fifty_move_key[8];
 Key threefold_key;
 
 constexpr Piece piece_list[] = { W_PAWN, W_KNIGHT, W_BISHOP, W_ROOK, W_QUEEN, W_KING,
-									B_PAWN, B_KNIGHT, B_BISHOP, B_ROOK, B_QUEEN, B_KING };
+								 B_PAWN, B_KNIGHT, B_BISHOP, B_ROOK, B_QUEEN, B_KING };
 
-// castling_helper helper
 int castling_helper[64];
 	
 void Position::init() {
@@ -55,7 +56,6 @@ void Position::init() {
 void Position::pop_stack() {
 	Undo* t = undo_stack;
 	undo_stack = undo_stack->prev;
-	if (t->del) { delete t; }
 }
 
 void Position::clear_stack() {
@@ -68,10 +68,9 @@ void Position::rebuild() { // computes others from squares data.
 		pieces[to_upiece(p)] ^= SquareBoard[i];
 		if (p != EMPTY) {
 			colors[to_color(p)] ^= SquareBoard[i];
-			piece_count[p]++;
-			piece_count[EMPTY]++;
-			material += piece_table[p][i];
-			material_t += Material_MG[to_upiece(p)];
+			material_total += Material_MG[to_upiece(p)];
+			m[to_color(p)] += Material_MG[to_upiece(p)];
+			piece_count++;
 			undo_stack->key ^= piece_keys[p][i];
 		}
 	}
@@ -79,6 +78,8 @@ void Position::rebuild() { // computes others from squares data.
 	undo_stack->checkers =
 		get_attackers(lsb_square(get_pieces(side_to_move, KING)), ~pieces[EMPTY])
 		& colors[~side_to_move];
+
+	compute_L0(accumulator, squares, net);
 }
 
 // place/remove/move functions - dont handle key xor
@@ -87,10 +88,11 @@ inline void Position::place(Piece p, Square s) {
 	pieces[UEMPTY] ^= SquareBoard[s];
 	colors[to_color(p)] ^= SquareBoard[s];
 	pieces[to_upiece(p)] ^= SquareBoard[s];
-	piece_count[p]++;
-	piece_count[EMPTY]++;
-	material += piece_table[p][s];
-	material_t += Material_MG[to_upiece(p)];
+	piece_count++;
+	material_total += Material_MG[to_upiece(p)];
+	m[to_color(p)] += Material_MG[to_upiece(p)];
+
+	update_L0_place(accumulator, p, s, net);
 }
 
 inline void Position::remove(Piece p, Square s) {
@@ -98,10 +100,11 @@ inline void Position::remove(Piece p, Square s) {
 	pieces[UEMPTY] ^= SquareBoard[s];
 	colors[to_color(p)] ^= SquareBoard[s];
 	pieces[to_upiece(p)] ^= SquareBoard[s];
-	piece_count[p]--;
-	piece_count[EMPTY]--;
-	material -= piece_table[p][s];
-	material_t -= Material_MG[to_upiece(p)];
+	piece_count--;
+	material_total -= Material_MG[to_upiece(p)];
+	m[to_color(p)] -= Material_MG[to_upiece(p)];
+
+	update_L0_remove(accumulator, p, s, net);
 }
 
 inline void Position::move_piece(Piece p, Square from, Square to) {
@@ -110,14 +113,18 @@ inline void Position::move_piece(Piece p, Square from, Square to) {
 	pieces[UEMPTY] ^= SquareBoard[from] ^ SquareBoard[to];
 	colors[to_color(p)] ^= SquareBoard[from] ^ SquareBoard[to];
 	pieces[to_upiece(p)] ^= SquareBoard[from] ^ SquareBoard[to];
-	material += piece_table[p][to] - piece_table[p][from];
+
+	update_L0_remove(accumulator, p, from, net);
+	update_L0_place(accumulator, p, to, net);
 }
 
-Position::Position() {
+Position::Position(Net* n) {
 	memset(this, 0, sizeof(Position));
 	undo_stack = new Undo;
 	memset(undo_stack, 0, sizeof(Undo));
 	undo_stack->prev = nullptr;
+
+	net = n;
 }
 
 void Position::verify() {
@@ -126,7 +133,7 @@ void Position::verify() {
 		cout << "Colors overlap detected" << endl;
 	}
 
-	Position testpos;
+	Position testpos(net);
 	for (int i = 0; i < 64; i++) { testpos.squares[i] = squares[i]; }
 	testpos.rebuild();
 
@@ -139,16 +146,19 @@ void Position::verify() {
 		if (testpos.pieces[i] != pieces[i]) {
 			cout << "Pieces inconsistent at " << i << endl;
 		}
-		if (i != 0 && testpos.piece_count[i] != piece_count[i]) {
-			cout << "White piece count inconsistent at " << i << endl;
-		}
-		if (i != 0 && testpos.piece_count[i + 8] != piece_count[i + 8]) {
-			cout << "Black piece count inconsistent at " << i + 8 << endl;
+		if (i != 0 && testpos.piece_count != piece_count) {
+			cout << "piece count inconsistent" << endl;
 		}
 	}
 
 	if (testpos.colors[WHITE] != colors[WHITE]) { cout << "White inconsistent" << endl; }
 	if (testpos.colors[BLACK] != colors[BLACK]) { cout << "Black inconsistent" << endl; }
+
+	for (int i = 0; i < 2 * SIZE_O0; i++) {
+		if (testpos.accumulator[i] != accumulator[i]) {
+			cout << "Accumulator inconsistent at" << i << endl;
+		}
+	}
 }
 
 Key Position::get_key() {
@@ -227,7 +237,7 @@ int Position::see(Move m) {
 		rq &= ~lp;
 		attackers |= see_attackers(s, occupied, bq, rq);
 		c = ~c;
-		if (depth > 6) { return EVAL_WIN; }
+		if (depth > 6) { return 1024; }
 	} 
 	while (lp = see_least_piece(c, attackers, u));
 
@@ -348,7 +358,6 @@ ostream& operator<<(ostream& os, Position& pos) {
 
 	// repetition
 	os << "Repetition: " << pos.undo_stack->repetition << endl;
-	os << "Repetition: " << pos.get_repetition(2) << endl;
 
 	return os;
 }
@@ -360,8 +369,10 @@ void Position::set(string fen) {
 	// first clear stack
 	clear_stack();
 	Undo* temp = undo_stack;
+	Net* temp2 = net;
 	memset(this, 0, sizeof(Position));
 	undo_stack = temp;
+	net = temp2;
 	memset(undo_stack, 0, sizeof(Undo));
 
 	// set pieces from rank 8.
@@ -471,7 +482,6 @@ void Position::do_move(Move m, Undo* new_undo) {
 	new_undo->prev = undo_stack;
 	new_undo->fifty_move++;
 	new_undo->enpassant = Square(0);
-	new_undo->del = false;
 		
 	if (undo_stack->enpassant != Square(0)) {
 		new_undo->key ^= enpassant_keys[get_file(undo_stack->enpassant)];
@@ -503,7 +513,6 @@ void Position::do_move(Move m, Undo* new_undo) {
 
 		if (to_upiece(moved) == PAWN) {
 			// other stack variables
-			new_undo->pawn_key ^= piece_keys[moved][from] ^ piece_keys[moved][to];
 			new_undo->fifty_move = 0;
 
 			// set en passant square
@@ -534,7 +543,6 @@ void Position::do_move(Move m, Undo* new_undo) {
 	case 1: { // Promotion
 		remove(moved, from);
 		new_undo->key ^= piece_keys[moved][from];
-		new_undo->pawn_key ^= piece_keys[moved][from];
 		// change moved to promoted piece
 		moved = to_piece(get_promotion(m), side_to_move);
 		place(moved, to);
@@ -572,7 +580,6 @@ void Position::do_move(Move m, Undo* new_undo) {
 		Key k = piece_keys[captured_pawn][captured_square]
 			^ piece_keys[moved][from] ^ piece_keys[moved][to];
 		new_undo->key ^= k;
-		new_undo->pawn_key ^= k;
 		break;
 	}
 	}
@@ -664,7 +671,6 @@ void Position::do_null_move(Undo* new_undo) {
 	memcpy(new_undo, undo_stack, sizeof(Undo));
 	new_undo->prev = undo_stack;
 	new_undo->enpassant = Square(0);
-	new_undo->del = false;
 
 	if (undo_stack->enpassant != Square(0)) {
 		new_undo->key ^= enpassant_keys[get_file(undo_stack->enpassant)];
@@ -686,9 +692,125 @@ void Position::undo_null_move() {
 	pop_stack();
 }
 
+void Position::set_random(int pieces, PRNG* r) {
+	if (pieces < 2) { pieces = 2; }
+	uint64_t seed = r->get_seed();
+
+	// Zero
+	clear_stack();
+	Undo* temp = undo_stack;
+	Net* temp2 = net;
+	memset(this, 0, sizeof(Position));
+	undo_stack = temp;
+	net = temp2;
+	memset(undo_stack, 0, sizeof(Undo));
+
+	// Pick Side
+	side_to_move = Color(r->get() % 2);
+	if (side_to_move == BLACK) { undo_stack->key ^= side_to_move_key; }
+
+	Square sq[32];
+	Bitboard occ = EmptyBoard;
+
+	// Place Kings
+	do {
+		sq[0] = Square(r->get() % SQ_END);
+		sq[1] = Square(r->get() % SQ_END);
+	} while (Distance[sq[0]][sq[1]] < 2);
+
+	squares[sq[0]] = W_KING;
+	squares[sq[1]] = B_KING;
+	undo_stack->king_square[WHITE] = sq[0];
+	undo_stack->king_square[BLACK] = sq[1];
+	Bitboard ksq[2];
+	ksq[WHITE] = SquareBoard[sq[0]];
+	ksq[BLACK] = SquareBoard[sq[1]];
+	occ ^= ksq[WHITE] ^ ksq[BLACK];
+
+	int i = 2;
+	while (i < pieces) {
+		sq[i] = Square(r->get() % SQ_END);
+		bool skip = false;
+		for (int j = 0; j < i; j++) {
+			if (sq[i] == sq[j]) { 
+				skip = true;
+				break;
+			}
+		}
+		if (skip) { continue; }
+
+		Color c = Color(r->get() % 2);
+		int u_r = r->get() % 15;
+		UPiece u = u_r < 8 ? PAWN :
+			u_r < 10 ? KNIGHT :
+			u_r < 12 ? BISHOP :
+			u_r < 14 ? ROOK :
+			QUEEN;
+		Piece p = to_piece(u, c);
+
+		if (u == PAWN &&
+			(get_rank(sq[i]) == 0 || get_rank(sq[i]) == 7)) {
+			continue;
+		}
+
+		occ ^= SquareBoard[sq[i]];
+
+		switch (u) {
+		case PAWN: {
+			if (c == WHITE) {
+				if (attacks_pawn<WHITE>(sq[i]) & ksq[BLACK]) { 
+					skip = true;
+				}
+			}
+			else {
+				if (attacks_pawn<BLACK>(sq[i]) & ksq[WHITE]) { 
+					skip = true;
+				}
+			}
+			break;
+		}
+		case KNIGHT: {
+			if (attacks<KNIGHT>(sq[i], occ) & ksq[~c]) {
+				skip = true;
+			}
+			break;
+		}
+		case BISHOP: {
+			if (attacks<BISHOP>(sq[i], occ) & ksq[~c]) {
+				skip = true;
+			}
+			break;
+		}
+		case ROOK: {
+			if (attacks<ROOK>(sq[i], occ) & ksq[~c]) {
+				skip = true;
+			}
+			break;
+		}
+		case QUEEN: {
+			if (attacks<QUEEN>(sq[i], occ) & ksq[~c]) {
+				skip = true;
+			}
+			break;
+		}
+		}
+
+		if (skip) {
+			occ ^= SquareBoard[sq[i]];
+			continue;
+		}
+
+		squares[sq[i]] = p;
+		i++;
+	}
+
+	rebuild();
+
+	if (undo_stack->checkers) { throw seed; }
+}
+
 Position& Position::operator=(const Position board) {
 	clear_stack();
-	delete undo_stack;
 	memcpy(this, &board, sizeof(Position));
 	undo_stack = new Undo;
 	memcpy(undo_stack, board.undo_stack, sizeof(Undo));

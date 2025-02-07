@@ -11,7 +11,7 @@ void print_option() {
 	//	 << "option name PawnTable type spin default " << PAWN_TABLE_MB_DEFAULT << " min 0 max " << PAWN_TABLE_MB_MAX << "\n"
 			<< "option name LichessTiming type check default false\n"
 			<< "option name Ponder type check default false\n"
-			<< "option name Stopifmate type check default true\n"
+			<< "option name Stopifmate type check default false\n"
 			<< "option name Contempt type spin default 0 min 0 max 100\n"
 			<< "option name Strength type spin default 100 min 0 max 100\n"
 			<< "option name MultiPV type spin default 1 min 1 max 16\n"
@@ -46,21 +46,6 @@ void set_option(istringstream& ss) {
 				Main_TT.change_size((size_t)(new_size));
 			}
 		}
-
-		//else if (word == "PawnTable") {
-		//	ss >> word;
-		//	if (word == "value") {
-		//		ss >> word;
-		//		int new_size;
-		//		ss >> new_size;
-		//		if (new_size < 0) { new_size = 0; }
-		//		else {
-		//			while ((new_size & (new_size - 1)) != 0) { new_size--; }
-		//			if (new_size > PAWN_TABLE_MB_MAX) { new_size = PAWN_TABLE_MB_MAX; }
-		//		}
-		//		Pawn_TT.change_size((size_t)(new_size));
-		//	}
-		//}
 
 		else if (word == "LichessTiming") {
 			ss >> word;
@@ -112,8 +97,6 @@ void set_option(istringstream& ss) {
 						+ (100 - s) * 2
 						+ (100 - s) * (100 - s) / 32;
 				}
-				material_bias = 100 - s;
-				material_init();
 			}
 		}
 
