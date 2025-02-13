@@ -83,7 +83,7 @@ int alpha_beta(SearchParams* sp, TTEntry* probe,
 					(board->get_fiftymove() > 99 && !board->get_checkers()))
 				{
 					draw_move = m;
-					comp_eval = EVAL_INIT; // Skip
+					comp_eval = EVAL_FAIL; // Skip
 				}
 				// Probe Table and Search
 				else

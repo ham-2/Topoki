@@ -18,8 +18,8 @@ constexpr int SIZE_F3 = SIZE_O2;
 constexpr int SIZE_O3 = 2;
 
 constexpr int SHIFT_L1 = 2;
-constexpr int SHIFT_L2 = 7;
-constexpr int SHIFT_L3 = 7;
+constexpr int SHIFT_L2 = 5;
+constexpr int SHIFT_L3 = 5;
 
 constexpr int MAX_L1 = 255;
 constexpr int MAX_L2 = 255;

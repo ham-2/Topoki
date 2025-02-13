@@ -726,6 +726,23 @@ void Position::set_random(int pieces, PRNG* r) {
 	ksq[WHITE] = SquareBoard[sq[0]];
 	ksq[BLACK] = SquareBoard[sq[1]];
 	occ ^= ksq[WHITE] ^ ksq[BLACK];
+	bool bs[4] = { false, false, false, false };
+
+	Piece ps[30] = {
+		W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN,
+		B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN,
+		W_ROOK, W_ROOK, B_ROOK, B_ROOK,
+		W_BISHOP, W_BISHOP, B_BISHOP, B_BISHOP,
+		W_KNIGHT, W_KNIGHT, B_KNIGHT, B_KNIGHT,
+		W_QUEEN, B_QUEEN
+	};
+
+	for (int s = 30; s > 1; s--) {
+		int t = r->get() % s;
+		Piece tmp = ps[t];
+		ps[t] = ps[s - 1];
+		ps[s - 1] = tmp;
+	}
 
 	int i = 2;
 	while (i < pieces) {
@@ -739,15 +756,10 @@ void Position::set_random(int pieces, PRNG* r) {
 		}
 		if (skip) { continue; }
 
-		Color c = Color(r->get() % 2);
-		int u_r = r->get() % 15;
-		UPiece u = u_r < 8 ? PAWN :
-			u_r < 10 ? KNIGHT :
-			u_r < 12 ? BISHOP :
-			u_r < 14 ? ROOK :
-			QUEEN;
-		Piece p = to_piece(u, c);
-
+		Piece p = ps[i - 2];
+		Color c = to_color(p);
+		UPiece u = to_upiece(p);
+		
 		if (u == PAWN &&
 			(get_rank(sq[i]) == 0 || get_rank(sq[i]) == 7)) {
 			continue;
@@ -778,6 +790,28 @@ void Position::set_random(int pieces, PRNG* r) {
 		case BISHOP: {
 			if (attacks<BISHOP>(sq[i], occ) & ksq[~c]) {
 				skip = true;
+			}
+			else {
+				if (c == WHITE) {
+					if (sq[i] % 2 == 0) {
+						if (bs[0]) { skip = true; }
+						else { bs[0] = true; }
+					}
+					else {
+						if (bs[1]) { skip = true; }
+						else { bs[1] = true; }
+					}
+				}
+				else {
+					if (sq[i] % 2 == 0) {
+						if (bs[2]) { skip = true; }
+						else { bs[2] = true; }
+					}
+					else {
+						if (bs[3]) { skip = true; }
+						else { bs[3] = true; }
+					}
+				}
 			}
 			break;
 		}

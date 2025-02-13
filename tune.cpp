@@ -4,7 +4,8 @@ using namespace std;
 
 constexpr int LOSS_SMOOTH = (1 << 12);
 constexpr int THREAD_LOOP = 8;
-constexpr int SOLVE_DEPTH = 9;
+constexpr int PICK_THRESHOLD = (4 << (EVAL_BITS - 6));
+constexpr int PICK_DIV = PICK_THRESHOLD / 64;
 
 int tb_probe(Position* board) {
 	return tb_probe_wdl(
@@ -263,6 +264,7 @@ struct PBS {
 	TT* table;
 	Move* game;
 	bool* quiet;
+	//int* decay;
 	int score_true;
 };
 
@@ -274,13 +276,23 @@ int _find_best(Position* board, int find_depth, PBS* p, int pos)
 
 	if (legal_moves.list == legal_moves.end) {
 		p->score_true = board->get_checkers() ? EVAL_LOW : 0;
+		p->quiet[pos] = quiet;
+		//p->decay[pos] = 100;
 		return 0;
 	}
 	else if (board->get_piece_count() <= 5) { 
 		int tb = tb_probe(board);
-
 		p->score_true = tb == 4 ? EVAL_HIGH :
 			tb == 0 ? EVAL_LOW : 0;
+		//p->quiet[pos] = false;
+		p->quiet[pos] = quiet;
+		for (int i = 0; i < legal_moves.length(); i++) {
+			Move m = legal_moves.list[i];
+			if (board->is_non_quiesce(m)) {
+				p->quiet[pos] = false;
+			}
+		}
+		//p->decay[pos] = 100;
 		return 0;
 	}
 	else {
@@ -289,6 +301,7 @@ int _find_best(Position* board, int find_depth, PBS* p, int pos)
 		int comp_eval;
 		int new_eval = EVAL_INIT;
 		int eval_list[256] = {};
+		int eval_pick[256] = {};
 
 		SearchParams sp = { board, &(Threads.stop), p->table, 1 };
 		p->table->increment();
@@ -300,10 +313,14 @@ int _find_best(Position* board, int find_depth, PBS* p, int pos)
 			board->do_move(m, &u);
 
 			// Repetition + 50-move
-			if ((board->get_repetition(100)) ||
-				(board->get_fiftymove() > 99 && !board->get_checkers()))
+			if (board->get_repetition(100) ||
+				board->get_fiftymove() > 99)
 			{
-				if (nmove == NULL_MOVE) { nmove = m; }
+				eval_list[i] = EVAL_FAIL;
+				if (nmove == NULL_MOVE) { 
+					nmove = m;
+					new_eval = EVAL_FAIL;
+				}
 			}
 			else 
 			{
@@ -355,20 +372,20 @@ int _find_best(Position* board, int find_depth, PBS* p, int pos)
 			board->undo_move(m);
 		}
 
-		//int cumul = 0;
-		//for (int i = 0; i < legal_moves.length(); i++) {
-		//	eval_list[i] = eval_list[i] - new_eval + (2 << (EVAL_BITS - 6));
-		//	if (eval_list[i] < 0) { eval_list[i] = 0; }
-		//	eval_list[i] >>= (EVAL_BITS - 9);
-		//	eval_list[i] = eval_list[i] * eval_list[i];
-		//	eval_list[i] = eval_list[i] * eval_list[i] * eval_list[i];
-		//	cumul += eval_list[i];
-		//	eval_list[i] = cumul;
-		//}
-		//int movepick = p->r->get() % cumul;
-		//int nmove_i = 0;
-		//while (eval_list[nmove_i] < movepick) { nmove_i++; }
-		//nmove = legal_moves.list[nmove_i];
+		int cumul = 0;
+		for (int i = 0; i < legal_moves.length(); i++) {
+			eval_list[i] = eval_list[i] - new_eval + PICK_THRESHOLD;
+			if (eval_list[i] < 0) { eval_list[i] = 0; }
+			eval_pick[i] = eval_list[i] / PICK_DIV;
+			eval_pick[i] = eval_pick[i] * eval_pick[i] * eval_pick[i];
+			cumul += eval_pick[i];
+			eval_pick[i] = cumul;
+		}
+		int movepick = p->r->get() % cumul;
+		int nmove_i = 0;
+		while (eval_pick[nmove_i] < movepick &&
+			nmove_i < legal_moves.length() - 1) { nmove_i++; }
+		nmove = legal_moves.list[nmove_i];
 
 		if (board->is_non_quiesce(nmove)) {
 			quiet = false;
@@ -376,6 +393,7 @@ int _find_best(Position* board, int find_depth, PBS* p, int pos)
 
 		p->game[pos] = nmove;
 		p->quiet[pos] = quiet;
+		//p->decay[pos] = eval_list[nmove_i] * 100 / PICK_THRESHOLD;
 		return 1;
 	}
 }
@@ -397,6 +415,7 @@ void _do_learning_thread(Net_train* src,
 	Move* game = (Move*)malloc(sizeof(Move) * 8192);
 	bool* quiet = (bool*)malloc(sizeof(bool) * 8192);
 	Undo* stack = (Undo*)malloc(sizeof(Undo) * 8192);
+	//int* decay = (int*)malloc(sizeof(int) * 8192);
 
 	while (!(*stop)) {
 		copy_float(src_, src);
@@ -426,7 +445,15 @@ void _do_learning_thread(Net_train* src,
 				board->do_move(game[pos], stack + pos);
 				pos++;
 			}
+
 			score_true = pb.score_true;
+			if (quiet[pos]) {
+				backpropagate(pb.dst_, board,
+					score_true,
+					pb.loss_curr, pb.lr);
+				(*poss)++;
+			}
+
 			while (!Threads.stop && pos > 0) {
 				pos--;
 				board->undo_move(game[pos]);
@@ -437,10 +464,6 @@ void _do_learning_thread(Net_train* src,
 						pb.loss_curr, pb.lr);
 					(*poss)++;
 				}
-				//backpropagate(pb.dst_, board,
-				//	score_true,
-				//	pb.loss_curr, pb.lr);
-				//(*poss)++;
 			}
 
 			//while (pos < 8192 &&
